@@ -144,7 +144,8 @@ object SyncEventConverter {
       StructField("event_device_id", StringType, nullable = true), // present in most events
       StructField("event_flow_id", StringType, nullable = true), // present in most events
       StructField("event_device_version", StringType, nullable = true), // present in most events
-      StructField("event_device_os", StringType, nullable = true) // present in most events
+      StructField("event_device_os", StringType, nullable = true), // present in most events
+      StructField("event_device_type", StringType, nullable = true)
   )
   )
 
@@ -157,6 +158,35 @@ object SyncEventConverter {
 
   private def eventsToRows(ping: JValue, events: List[List[Any]]): List[Row] = {
     events.flatMap(event => eventToRow(ping, event))
+  }
+
+  private def deviceToMap(dev: JValue): Option[Map[String, (String, String, String)]] = {
+    val devID = dev \ "id" match {
+      case JString(x) => x
+      case _ => null
+    }
+    val devSyncID = dev \ "syncID" match {
+      case JString(x) => x
+      case _ => null
+    }
+    val devVer = dev \ "version" match {
+      case JString(x) => x
+      case _ => null
+    }
+    val devOS = dev \ "os" match {
+      case JString(x) => x
+      case _ => null
+    }
+    val devType = dev \ "type" match {
+      case JString(x) => x
+      case _ => null
+    }
+    val ids = List(devID, devSyncID) filter((x: String) => x != null)
+    if (ids.nonEmpty && devVer != null && devOS != null && devType != null) {
+      Some(Map[String, (String, String, String)](ids map((id: String) => (id, (devVer, devOS, devType))) : _*))
+    } else {
+      None
+    }
   }
 
   // scalastyle:off return
@@ -213,36 +243,22 @@ object SyncEventConverter {
       case None => return None
       case Some(x) => x
     }
-    val devices: Map[String, (String, String)] = payload \ "syncs" match {
+    val topLevelDevices: Map[String, (String, String, String)] = payload \ "devices" match {
+      case JArray(devs) => devs.flatMap(deviceToMap).reduce((a, b) => a ++ b)
+      case _ => Map()
+    }
+    val nestedDevices: Map[String, (String, String, String)] = payload \ "syncs" match {
       case JArray(l) => {
         val deviceMaps = l.flatMap(v => v \ "devices" match {
-          case JArray(devs) => {
-            devs.flatMap(dev => {
-              val devID = dev \ "id" match {
-                case JString(x) => x
-                case _ => null
-              }
-              val devVer = dev \ "version" match {
-                case JString(x) => x
-                case _ => null
-              }
-              val devOS = dev \ "os" match {
-                case JString(x) => x
-                case _ => null
-              }
-              if (devID != null && devVer != null && devOS != null) {
-                Some(Map[String, (String, String)]((devID, (devVer, devOS))))
-              } else {
-                None
-              }
-            })
-          }
+          case JArray(devs) => devs.flatMap(deviceToMap)
           case _ => List()
-        }) ++ List(Map.empty[String, (String, String)]) // ensure deviceMaps is not empty
+        }) ++ List(Map.empty[String, (String, String, String)]) // ensure deviceMaps is not empty
         deviceMaps.reduce((a, b) => a ++ b)
       }
       case _ => Map()
     }
+
+    val devices = topLevelDevices ++ nestedDevices
 
     val values = eventObject.mapValues match {
       case Some(x: Map[String @unchecked, String @unchecked]) => {
@@ -251,7 +267,7 @@ object SyncEventConverter {
           if (deviceID == null) {
             (null, null)
           } else {
-            devices getOrElse(deviceID, (null, null))
+            devices getOrElse(deviceID, (null, null, null))
           }
 
         List(

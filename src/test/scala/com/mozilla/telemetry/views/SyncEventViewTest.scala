@@ -190,6 +190,152 @@ class SyncEventViewTest extends FlatSpec with Matchers with DataFrameSuiteBase {
       |}
     """.stripMargin)
 
+  def syncPayloadTopLevelDevices: JValue = parse(
+    """
+      |{
+      |  "type": "sync",
+      |  "id": "a1d969b7-0084-4a78-a841-2abaf887f1b4",
+      |  "creationDate": "2016-09-08T18:19:09.808Z",
+      |  "version": 4,
+      |  "application": {
+      |    "architecture": "x86-64",
+      |    "buildId": "20160907030427",
+      |    "name": "Firefox",
+      |    "version": "51.0a1",
+      |    "displayVersion": "51.0a1",
+      |    "vendor": "Mozilla",
+      |    "platformVersion": "51.0a1",
+      |    "xpcomAbi": "x86_64-msvc",
+      |    "channel": "nightly"
+      |  },
+      |  "payload": {
+      |    "why": "schedule",
+      |    "version": 1,
+      |    "uid": "12345678912345678912345678912345",
+      |    "deviceID": "2222222222222222222222222222222222222222222222222222222222222222",
+      |    "devices": [
+      |      {
+      |        "os": "WINNT",
+      |        "version": "71.0a1",
+      |        "syncID": "asdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdf",
+      |        "id": "2222222222222222222222222222222222222222222222222222222222222222",
+      |        "type": "desktop"
+      |      },
+      |      {
+      |        "os": "WINNT",
+      |        "version": "70.0a1",
+      |        "syncID": "3333333333333333333333333333333333333333333333333333333333333333",
+      |        "id": "1234123412341234123412341234123412341234123412341234123412341234",
+      |        "type": "desktop"
+      |      },
+      |      "devices": [
+      |        {
+      |          "id": "4444444444444444444444444444444444444444444444444444444444444444",
+      |          "type": "mobile"
+      |        }
+      |      ],
+      |    ],
+      |    "syncs": [
+      |      {
+      |        "when": 1473313854446,
+      |        "took": 2277,
+      |        "engines": [
+      |          {
+      |            "name": "clients",
+      |            "outgoing": [
+      |              {
+      |                "sent": 1
+      |              }
+      |            ],
+      |            "took": 468
+      |          },
+      |          {
+      |            "name": "passwords",
+      |            "took": 16
+      |          },
+      |          {
+      |            "name": "tabs",
+      |            "incoming": {
+      |              "applied": 2,
+      |              "reconciled": 1
+      |            },
+      |            "outgoing": [
+      |              {
+      |                "sent": 1
+      |              }
+      |            ],
+      |            "took": 795
+      |          },
+      |          {
+      |            "name": "bookmarks"
+      |          },
+      |          {
+      |            "name": "forms",
+      |            "outgoing": [
+      |              {
+      |                "sent": 2
+      |              }
+      |            ],
+      |            "took": 266
+      |          },
+      |          {
+      |            "name": "history",
+      |            "incoming": {
+      |              "applied": 2
+      |            },
+      |            "outgoing": [
+      |              {
+      |                "sent": 2
+      |              }
+      |            ],
+      |            "took": 514
+      |          }
+      |        ]
+      |      },
+      |      {
+      |        "when": 1473313890947,
+      |        "took": 484,
+      |        "engines": [
+      |          {
+      |            "name": "clients",
+      |            "took": 249
+      |          },
+      |          {
+      |            "name": "passwords"
+      |          },
+      |          {
+      |            "name": "tabs",
+      |            "took": 16
+      |          },
+      |          {
+      |            "name": "bookmarks"
+      |          },
+      |          {
+      |            "name": "forms"
+      |          },
+      |          {
+      |            "name": "history"
+      |          }
+      |        ]
+      |      }
+      |    ],
+      |    "events": [
+      |      [1234, "sync", "displayURI", "sendcommand", null,
+      |        {
+      |          "deviceID": "3333333333333333333333333333333333333333333333333333333333333333",
+      |          "flowID": "aaaaaaaaaaaaa"
+      |        }
+      |      ],
+      |      [2345, "sync", "displayURI", "processcommand", null,
+      |       {
+      |          "deviceID": "4444444444444444444444444444444444444444444444444444444444444444",
+      |          "flowID": "bbbbbbbbbbbbbb"
+      |        }
+      |      ]
+      |    ]
+      |  }
+      |}
+    """.stripMargin)
   "Sync Events" can "be serialized" in {
     implicit val formats = DefaultFormats
     sc.setLogLevel("WARN")
@@ -254,5 +400,23 @@ class SyncEventViewTest extends FlatSpec with Matchers with DataFrameSuiteBase {
     checkRow.getAs[String]("event_device_id") should be((event(5) \ "deviceID").extract[String])
     checkRow.getAs[String]("event_device_version") should be(null)
     checkRow.getAs[String]("event_device_os") should be(null)
+  }
+  "Sync Events" can "read device information out of the top level that contains type info" in {
+    sc.setLogLevel("WARN")
+    implicit val formats = DefaultFormats
+    val row = SyncEventConverter.pingToRows(syncPayloadWithOs)
+    val rdd = sc.parallelize(row)
+
+    val dataframe = spark.createDataFrame(rdd, SyncEventConverter.syncEventSchema)
+
+    // verify the contents.
+    dataframe.count() should be(1)
+    val checkRow = dataframe.first()
+
+    val payload = syncPayload \ "payload"
+
+    checkRow.getAs[String]("device_os_name") should be("iOS")
+    checkRow.getAs[String]("device_os_version") should be("10.0")
+    checkRow.getAs[String]("device_os_locale") should be("en_US")
   }
 }
